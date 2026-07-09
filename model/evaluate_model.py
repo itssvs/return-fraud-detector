@@ -51,7 +51,10 @@ def top_percent_flags(scores: np.ndarray, percent: float = TOP_RISK_PERCENT) -> 
     n_top = max(1, int(np.ceil(len(scores) * percent)))
     cutoff = np.sort(scores)[-n_top]
     return scores >= cutoff
-
+def precision_at_k(scores: np.ndarray, y_true: np.ndarray, k: int) -> tuple[int, float]:
+    top_k_idx = np.argsort(scores)[-k:]
+    hits = y_true[top_k_idx].sum()
+    return int(hits), hits / k
 
 def load_feature_columns(model_dir: str) -> list[str]:
     path = os.path.join(model_dir, "feature_columns.json")
@@ -167,6 +170,8 @@ def main(input_path: str, model_dir: str):
     ae_flags = top_percent_flags(ae_risk_score)
     iso_flags = top_percent_flags(iso_risk_score)
     agreement_rate = np.mean(ae_flags == iso_flags)
+    hits_20, precision_at_20 = precision_at_k(combined_risk_score, y_true, 20)
+    hits_50, precision_at_50 = precision_at_k(combined_risk_score, y_true, 50)
 
     print("\nEvaluation on synthetic held-out test set")
     print("----------------------------------------")
@@ -191,6 +196,10 @@ def main(input_path: str, model_dir: str):
     print("\nModel agreement")
     print("---------------")
     print(f"Autoencoder vs Isolation Forest top-15% flag agreement: {agreement_rate:.4f}")
+    print("\nPrecision@K (top-ranked customers)")
+    print("-----------------------------------")
+    print(f"Precision@20: {hits_20}/20 injected fraud customers in top 20 -> {precision_at_20:.4f}")
+    print(f"Precision@50: {hits_50}/50 injected fraud customers in top 50 -> {precision_at_50:.4f}")
 
 
 if __name__ == "__main__":
