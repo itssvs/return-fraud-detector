@@ -8,6 +8,7 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from deep_translator import GoogleTranslator
 
 from app.local_db import (
     count_by_risk_level,
@@ -39,6 +40,18 @@ FEATURE_COLUMNS = [
     "category_diversity",
     "avg_transaction_value",
 ]
+LANGUAGE_CODES = {
+    "English": "en",
+    "Hindi": "hi",
+    "Spanish": "es",
+    "French": "fr",
+    "Tamil": "ta",
+    "Telugu": "te",
+    "Kannada": "kn",
+    "Malayalam": "ml",
+    "Bengali": "bn",
+    "Marathi": "mr",
+}
 
 
 app = FastAPI(title="Return Fraud Detection API")
@@ -67,7 +80,9 @@ class PredictRequest(BaseModel):
     version_diversity: float
     category_diversity: float
     avg_transaction_value: float
-
+class TranslateRequest(BaseModel):
+    target_language: str
+    content: dict
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -325,4 +340,115 @@ def dashboard_linked_accounts(phone_hash: str):
         "linked_accounts": linked_accounts,
         "aggregate_risk_score": aggregate_risk_score,
         "platforms_flagged_on": platforms,
+    }
+@app.get("/dashboard/customer/{customer_id}/recommendations")
+def customer_policy_recommendations(customer_id: str):
+    doc = get_prediction(customer_id)
+
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    features = doc.get("features", {})
+    reasons = doc.get("reasons", [])
+    score = int(doc.get("risk_score", 0))
+    level = doc.get("risk_level", "Low")
+    linked_accounts = get_predictions_by_phone_hash(doc.get("phone_hash", ""))
+
+    recommendations = []
+
+    if level == "High" or score >= 70:
+        recommendations.append({
+            "title": "Apply stricter return controls",
+            "action": "Shorten the return window and route refunds to manual review.",
+            "reason": f"This customer is flagged {level} risk with score {score}.",
+            "severity": "High",
+            "confidence": min(95, score + 5),
+        })
+
+    if len(linked_accounts) > 1:
+        recommendations.append({
+            "title": "Monitor linked accounts",
+            "action": "Review accounts sharing the same phone hash before approving refunds.",
+            "reason": f"{len(linked_accounts)} accounts share the same hashed phone number.",
+            "severity": "High",
+            "confidence": 90,
+        })
+
+    if features.get("refund_frequency", 0) >= 40:
+        recommendations.append({
+            "title": "Require refund verification",
+            "action": "Require receipt, order ID, and item condition verification.",
+            "reason": "Refund frequency is unusually high for this customer.",
+            "severity": "Medium",
+            "confidence": 85,
+        })
+
+    if features.get("high_value_return_ratio", 0) >= 1:
+        recommendations.append({
+            "title": "Disable instant refunds for high-value items",
+            "action": "Hold high-value refunds until the returned item is inspected.",
+            "reason": "High-value return ratio is elevated.",
+            "severity": "High",
+            "confidence": 88,
+        })
+
+    if features.get("version_diversity", 0) >= 3:
+        recommendations.append({
+            "title": "Inspect variant-swapping behavior",
+            "action": "Compare SKU, version, and serial details before accepting returns.",
+            "reason": "Returns span multiple product versions or variants.",
+            "severity": "Medium",
+            "confidence": 80,
+        })
+
+    if not recommendations:
+        recommendations.append({
+            "title": "Maintain standard return policy",
+            "action": "Allow normal return flow with routine monitoring.",
+            "reason": "No strong policy adjustment signal was found.",
+            "severity": "Low",
+            "confidence": 75,
+        })
+
+    return {
+        "customer_id": customer_id,
+        "recommendations": recommendations[:5],
+        "signals_used": {
+            "risk_score": score,
+            "risk_level": level,
+            "reasons": reasons,
+            "linked_account_count": len(linked_accounts),
+        },
+    }
+
+
+@app.post("/translate")
+def translate_content(payload: TranslateRequest):
+    target_code = LANGUAGE_CODES.get(payload.target_language)
+
+    if not target_code:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported language: {payload.target_language}",
+        )
+
+    if target_code == "en":
+        return {
+            "target_language": payload.target_language,
+            "translated_content": payload.content,
+        }
+
+    translator = GoogleTranslator(source="auto", target=target_code)
+
+    translated = {}
+
+    for key, value in payload.content.items():
+        if isinstance(value, str):
+            translated[key] = translator.translate(value)
+        else:
+            translated[key] = value
+
+    return {
+        "target_language": payload.target_language,
+        "translated_content": translated,
     }

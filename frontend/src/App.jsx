@@ -25,6 +25,11 @@ export default function App() {
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [linkedAccounts, setLinkedAccounts] = useState(null);
+  const [recommendations, setRecommendations] = useState(null);
+const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+const [language, setLanguage] = useState('English');
+const [translatedText, setTranslatedText] = useState(null);
+const [translating, setTranslating] = useState(false);
   const [riskFilter, setRiskFilter] = useState('High');
   const [loading, setLoading] = useState(true);
   const [scoring, setScoring] = useState(false);
@@ -83,27 +88,40 @@ export default function App() {
   };
 
   const selectCustomer = async (customer) => {
-    setSelectedCustomer(null);
-    setLinkedAccounts(null);
-    setError('');
+  setSelectedCustomer(null);
+  setLinkedAccounts(null);
+  setRecommendations(null);
+  setError('');
 
+  try {
+    const detailRes = await fetch(`${API_BASE}/dashboard/customer/${customer.customer_id}`);
+    if (!detailRes.ok) throw new Error('Failed to load customer detail');
+
+    const detail = await detailRes.json();
+    setSelectedCustomer(detail);
+
+    setRecommendationsLoading(true);
     try {
-      const detailRes = await fetch(`${API_BASE}/dashboard/customer/${customer.customer_id}`);
-      if (!detailRes.ok) throw new Error('Failed to load customer detail');
-
-      const detail = await detailRes.json();
-      setSelectedCustomer(detail);
-
-      if (detail.phone_hash) {
-        const linkedRes = await fetch(`${API_BASE}/dashboard/linked-accounts/${detail.phone_hash}`);
-        if (linkedRes.ok) {
-          setLinkedAccounts(await linkedRes.json());
-        }
+      const recRes = await fetch(`${API_BASE}/dashboard/customer/${detail.customer_id}/recommendations`);
+      if (recRes.ok) {
+        const recData = await recRes.json();
+        setRecommendations(recData);
       }
-    } catch (err) {
-      setError(err.message || 'Failed to load customer detail');
+    } finally {
+      setRecommendationsLoading(false);
     }
-  };
+
+    if (detail.phone_hash) {
+      const linkedRes = await fetch(`${API_BASE}/dashboard/linked-accounts/${detail.phone_hash}`);
+      if (linkedRes.ok) {
+        setLinkedAccounts(await linkedRes.json());
+      }
+    }
+  } catch (err) {
+    setError(err.message || 'Failed to load customer detail');
+    setRecommendationsLoading(false);
+  }
+};
 
   useEffect(() => {
     loadDashboard('High');
@@ -127,34 +145,113 @@ export default function App() {
     setLinkedAccounts(null);
     await loadDashboard(level);
   };
+  const t = (key, fallback) => translatedText?.[key] || fallback;
+
+const translateDashboard = async (targetLanguage) => {
+  setLanguage(targetLanguage);
+  setTranslatedText(null);
+
+  if (targetLanguage === 'English') return;
+
+  setTranslating(true);
+  setError('');
+
+  try {
+    const res = await fetch(`${API_BASE}/translate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_language: targetLanguage,
+        content: {
+  title: 'Retail Risk Intelligence Dashboard',
+  subtitle: 'Live anomaly scores, flagged accounts, and cross-platform phone hash linking.',
+  total_customers: 'Total Customers',
+  high_risk: 'High Risk',
+  medium_risk: 'Medium Risk',
+  low_risk: 'Low Risk',
+  avg_risk_score: 'Avg Risk Score',
+  risk_distribution: 'Risk Distribution',
+  flagged_accounts: 'Flagged Accounts',
+  sorted_by_highest: 'Sorted by highest risk score',
+  customer: 'Customer',
+  risk: 'Risk',
+  level: 'Level',
+  phone_hash: 'Phone Hash',
+  customer_detail: 'Customer Detail',
+  customer_id: 'Customer ID',
+  risk_score: 'Risk Score',
+  top_reasons: 'Top Reasons',
+  linked_accounts: 'Linked Accounts',
+  aggregate_risk_score: 'Aggregate Risk Score',
+  policy_recommendations: 'AI Policy Recommendations',
+  select_customer_detail: 'Select a flagged account to inspect model reasons.',
+  select_linked_accounts: 'Select a customer to reveal accounts sharing the same hashed phone number.',
+  select_customer_recommendations: 'Select a flagged account to generate policy recommendations.',
+  no_recommendations: 'No recommendations loaded.',
+  generating_recommendations: 'Generating recommendations...',
+  confidence: 'Confidence',
+  refresh: 'Refresh',
+  score_dataset: 'Score Dataset',
+},
+      }),
+    });
+
+    if (!res.ok) throw new Error('Translation failed');
+
+    const data = await res.json();
+    setTranslatedText(data.translated_content || null);
+  } catch (err) {
+    setError(err.message || 'Translation failed');
+  } finally {
+    setTranslating(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-7xl px-5 py-6 space-y-6">
         <header className="flex flex-col gap-4 border-b border-slate-800 pb-5 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-medium text-cyan-300">AI Return Fraud Monitor</p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight">Retail Risk Intelligence Dashboard</h1>
-            <p className="mt-2 text-sm text-slate-400">
-              Live anomaly scores, flagged accounts, and cross-platform phone hash linking.
-            </p>
+            <p className="text-sm font-medium text-cyan-300">BUSTED</p>
+            <h1 className="mt-1 text-3xl font-bold tracking-tight">
+  {t('title', 'Retail Risk Intelligence Dashboard')}
+</h1>
+<p className="mt-2 text-sm text-slate-400">
+  {t('subtitle', 'Live anomaly scores, flagged accounts, and cross-platform phone hash linking.')}
+</p>
           </div>
 
-          <div className="flex gap-3">
-            <button
-              onClick={() => loadDashboard(riskFilter)}
-              className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-900"
-            >
-              Refresh
-            </button>
-            <button
-              onClick={scoreAllCustomers}
-              disabled={scoring}
-              className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300 disabled:opacity-60"
-            >
-              {scoring ? 'Scoring...' : 'Score Dataset'}
-            </button>
-          </div>
+          <div className="flex flex-wrap items-center gap-3">
+  <select
+    value={language}
+    onChange={(e) => translateDashboard(e.target.value)}
+    className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+  >
+    <option>English</option>
+    <option>Hindi</option>
+    <option>Spanish</option>
+    <option>French</option>
+    <option>Tamil</option>
+    <option>Telugu</option>
+  </select>
+
+  {translating && <span className="text-sm text-slate-400">Translating...</span>}
+
+  <button
+    onClick={() => loadDashboard(riskFilter)}
+    className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-900"
+  >
+    Refresh
+  </button>
+
+  <button
+    onClick={scoreAllCustomers}
+    disabled={scoring}
+    className="rounded-lg bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300 disabled:opacity-60"
+  >
+    {scoring ? 'Scoring...' : 'Score Dataset'}
+  </button>
+</div>
         </header>
 
         {error && (
@@ -170,12 +267,12 @@ export default function App() {
         ) : (
           <>
             <section className="grid gap-4 md:grid-cols-5">
-              <MetricCard label="Total Customers" value={summary?.total_customers ?? 0} />
-              <MetricCard label="High Risk" value={summary?.high_risk_count ?? 0} tone="red" />
-              <MetricCard label="Medium Risk" value={summary?.medium_risk_count ?? 0} tone="amber" />
-              <MetricCard label="Low Risk" value={summary?.low_risk_count ?? 0} tone="emerald" />
+              <MetricCard label={t('total_customers', 'Total Customers')} value={summary?.total_customers ?? 0} />
+<MetricCard label={t('high_risk', 'High Risk')} value={summary?.high_risk_count ?? 0} tone="red" />
+<MetricCard label={t('medium_risk', 'Medium Risk')} value={summary?.medium_risk_count ?? 0} tone="amber" />
+<MetricCard label={t('low_risk', 'Low Risk')} value={summary?.low_risk_count ?? 0} tone="emerald" />
               <MetricCard
-                label="Avg Risk Score"
+                label={t('avg_risk_score', 'Avg Risk Score')}
                 value={Number(summary?.avg_risk_score || 0).toFixed(1)}
                 tone="cyan"
               />
@@ -183,7 +280,7 @@ export default function App() {
 
             <section className="grid gap-5 lg:grid-cols-3">
               <div className="rounded-lg border border-slate-800 bg-slate-900 p-5 lg:col-span-1">
-                <h2 className="text-lg font-semibold">Risk Distribution</h2>
+               <h2 className="text-lg font-semibold">{t('risk_distribution', 'Risk Distribution')}</h2>
                 <div className="mt-5 space-y-4">
                   {riskDistribution.map((item) => {
                     const pct = total ? (item.count / total) * 100 : 0;
@@ -360,6 +457,32 @@ export default function App() {
                 )}
               </div>
             </section>
+            <section className="rounded-lg border border-slate-800 bg-slate-900 p-5">
+  <h2 className="text-lg font-semibold">
+    {t('policy_recommendations', 'AI Policy Recommendations')}
+  </h2>
+
+  {!selectedCustomer ? (
+    <p className="mt-4 text-sm text-slate-400">
+      Select a flagged account to generate policy recommendations.
+    </p>
+  ) : recommendationsLoading ? (
+    <p className="mt-4 text-sm text-slate-400">Generating recommendations...</p>
+  ) : !recommendations?.recommendations?.length ? (
+    <p className="mt-4 text-sm text-slate-400">No recommendations loaded.</p>
+  ) : (
+    <div className="mt-5 grid gap-3 md:grid-cols-2">
+      {recommendations.recommendations.map((item, index) => (
+        <div key={index} className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+          <p className="font-semibold text-slate-100">{item.title}</p>
+          <p className="mt-1 text-sm text-cyan-300">{item.action}</p>
+          <p className="mt-3 text-sm text-slate-400">{item.reason}</p>
+          <p className="mt-2 text-xs text-slate-500">Confidence: {item.confidence}%</p>
+        </div>
+      ))}
+    </div>
+  )}
+</section>
           </>
         )}
       </div>
