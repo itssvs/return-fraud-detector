@@ -452,3 +452,33 @@ def translate_content(payload: TranslateRequest):
         "target_language": payload.target_language,
         "translated_content": translated,
     }
+@app.get("/dashboard/risk-histogram")
+async def risk_histogram():
+    all_predictions = get_all_predictions()
+
+    buckets = {"0-20": 0, "20-40": 0, "40-60": 0, "60-80": 0, "80-100": 0}
+    reason_counts = {}
+
+    for doc in all_predictions:
+        score = doc.get("risk_score", 0)
+        if score < 20:
+            buckets["0-20"] += 1
+        elif score < 40:
+            buckets["20-40"] += 1
+        elif score < 60:
+            buckets["40-60"] += 1
+        elif score < 80:
+            buckets["60-80"] += 1
+        else:
+            buckets["80-100"] += 1
+
+        for reason in doc.get("reasons", []):
+            if reason and reason != "Click for detailed reasons":
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+    top_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    return {
+        "histogram": [{"range": k, "count": v} for k, v in buckets.items()],
+        "top_reasons": [{"reason": r, "count": c} for r, c in top_reasons],
+    }
