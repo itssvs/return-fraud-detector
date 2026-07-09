@@ -139,7 +139,59 @@ def predict_risk(features: dict) -> dict:
         "reasons": reasons,
         "is_high_risk": is_high_risk,
     }
+def predict_risk_batch(features_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Vectorized version of predict_risk() for scoring many customers at once.
 
+    Input:
+        features_df: DataFrame containing at least the FEATURE_COLUMNS
+    Output:
+        DataFrame with added columns: score, reasons (list), is_high_risk
+        Row order is preserved from the input.
+    """
+    X = features_df[FEATURE_COLUMNS].copy()
+    X_scaled = SCALER.transform(X)
+
+    # --- Isolation Forest: whole batch in one call ---
+    iso_decision = ISOLATION_FOREST.decision_function(X_scaled)
+    iso_risk = 1.0 / (1.0 + np.exp(12.0 * iso_decision))
+
+    # --- Autoencoder: whole batch in one call (this is the big speed win) ---
+    reconstruction = AUTOENCODER.predict(X_scaled, batch_size=512, verbose=0)
+    reconstruction_error = np.mean(np.square(X_scaled - reconstruction), axis=1)
+    ae_risk = 1.0 - np.exp(-reconstruction_error)
+
+    combined = (0.5 * iso_risk) + (0.5 * ae_risk)
+    scores = np.clip(np.round(combined * 100), 0, 100).astype(int)
+
+    # --- SHAP: whole batch in one call ---
+    shap_values = SHAP_EXPLAINER.shap_values(X_scaled)
+    if isinstance(shap_values, list):
+        shap_values = shap_values[0]
+    shap_values = np.asarray(shap_values)
+
+    if shap_values.ndim == 3:
+        shap_values = shap_values[:, :, 0]
+
+    all_reasons = []
+    for row_shap in shap_values:
+        top_indices = np.argsort(np.abs(row_shap))[::-1][:3]
+        reasons = []
+        for idx in top_indices:
+            feature_name = FEATURE_COLUMNS[idx]
+            reasons.append(
+                FEATURE_REASON_TEXT.get(feature_name, f"{feature_name} contributed to risk")
+            )
+        while len(reasons) < 3:
+            reasons.append("Anomalous pattern detected across customer return behavior")
+        all_reasons.append(reasons[:3])
+
+    result_df = features_df.copy()
+    result_df["score"] = scores
+    result_df["reasons"] = all_reasons
+    result_df["is_high_risk"] = scores >= HIGH_RISK_THRESHOLD
+
+    return result_df
 
 if __name__ == "__main__":
     sample_features = {
