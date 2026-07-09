@@ -1,0 +1,8 @@
+[
+  "return_rate",
+  "refund_frequency",
+  "high_value_return_ratio",
+  "version_diversity",
+  "category_diversity",
+  "avg_transaction_value"
+]
